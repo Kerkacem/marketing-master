@@ -2351,28 +2351,24 @@ app.use((req: any, res, next) => {
     });
   });
 
-// Setup endpoint — check and fix migration via Supabase API
+// Setup guide page
+app.get("/setup", (req, res) => {
+  res.sendFile(path.join(process.cwd(), "setup.html"));
+});
+
+// Setup endpoint — check migration status
 app.get("/api/setup/status", async (req, res) => {
-  // Check if tables exist by probing the Supabase REST API
   const sb = (req as any).supabase;
   if (!sb) return res.json({ connected: false, ready: false, error: 'Supabase not configured' });
 
-  const tablesToCheck = ['users', 'projects', 'payments', 'integration_settings', 'incoming_orders', 'webhooks', 'blacklist', 'revit_orders', 'confirmation_codes'];
-  const existing: string[] = [];
+  // Quick check — just probe the users table
+  const { error } = await sb.from('users').select('id', { count: 'exact', head: true }).limit(0);
+  const ready = !error || error.code !== 'PGRST205';
 
-  for (const table of tablesToCheck) {
-    try {
-      const { error } = await sb.from(table).select('*', { count: 'exact', head: true });
-      if (!error || error.code !== 'PGRST205') existing.push(table);
-    } catch { /* skip */ }
-  }
-
-  const missing = tablesToCheck.filter(t => !existing.includes(t));
   res.json({
     connected: true,
-    existingTables: existing,
-    missingTables: missing,
-    ready: missing.length === 0
+    ready,
+    tablesExist: ready ? 'all tables present' : 'migration needed — run SQL via Supabase Dashboard > SQL Editor'
   });
 });
 

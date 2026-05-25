@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>إعداد قاعدة البيانات - Marketing Master</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: #0a0a0f; color: #e0e0e0; display: flex; justify-content: center; padding: 40px 20px; }
+    .container { max-width: 680px; width: 100%; }
+    h1 { font-size: 24px; margin-bottom: 8px; color: #fff; }
+    .subtitle { color: #888; margin-bottom: 32px; }
+    .card { background: #14141f; border: 1px solid #2a2a3a; border-radius: 12px; padding: 24px; margin-bottom: 20px; }
+    h2 { font-size: 18px; margin-bottom: 16px; color: #fff; }
+    ol { padding-right: 20px; line-height: 2; }
+    li { margin-bottom: 8px; }
+    a { color: #6c8cff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code { background: #1e1e2e; padding: 2px 8px; border-radius: 4px; font-size: 13px; color: #b0b0ff; }
+    .status-badge { display: inline-block; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; margin-bottom: 16px; }
+    .status-error { background: #3a1515; color: #ff6b6b; border: 1px solid #5a2020; }
+    .status-success { background: #153a15; color: #6bff6b; border: 1px solid #205a20; }
+    .sql-box { background: #0d0d15; border: 1px solid #2a2a3a; border-radius: 8px; padding: 16px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: #aaa; margin: 12px 0; max-height: 300px; overflow-y: auto; }
+    .btn { display: inline-block; background: #6c8cff; color: #fff; border: none; border-radius: 8px; padding: 10px 20px; font-size: 14px; cursor: pointer; font-weight: 600; }
+    .btn:hover { background: #5a7aee; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-copy { background: #2a2a3a; color: #ccc; margin-right: 8px; }
+    .btn-copy:hover { background: #3a3a4a; }
+    .actions { display: flex; gap: 8px; margin-top: 12px; }
+    #step3 { display: none; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>إعداد قاعدة البيانات</h1>
+    <p class="subtitle">Marketing Master يحتاج إلى تشغيل SQL Migration على Supabase</p>
+
+    <div class="card">
+      <h2>الخطوة 1: التحقق من حالة قاعدة البيانات</h2>
+      <div id="status-container">
+        <span class="status-badge status-error" id="status-badge">جاري الفحص...</span>
+      </div>
+      <button class="btn" onclick="checkStatus()">فحص الحالة</button>
+    </div>
+
+    <div class="card" id="step2">
+      <h2>الخطوة 2: تشغيل SQL Migration</h2>
+      <p style="margin-bottom: 12px; color: #aaa;">انسخ الكود التالي، اذهب إلى <a href="https://supabase.com/dashboard/project/llklgbevvexnjtotibtj/sql/new" target="_blank">Supabase SQL Editor</a>، الصقه واضغط Run:</p>
+      <div class="sql-box" id="sql-code"></div>
+      <div class="actions">
+        <button class="btn btn-copy" onclick="copySQL()">نسخ SQL</button>
+        <button class="btn" onclick="window.open('https://supabase.com/dashboard/project/llklgbevvexnjtotibtj/sql/new', '_blank')">فتح SQL Editor</button>
+      </div>
+    </div>
+
+    <div class="card" id="step3">
+      <h2>الخطوة 3: تأكيد التثبيت</h2>
+      <p style="color: #aaa; margin-bottom: 12px;">بعد تشغيل SQL في Supabase، ارجع إلى هنا واضغط "تأكيد" للتحقق:</p>
+      <button class="btn" onclick="checkStatus()">تأكيد التثبيت</button>
+    </div>
+  </div>
+
+  <script>
+    const MIGRATION_SQL = `CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, full_name TEXT DEFAULT '', avatar_url TEXT DEFAULT '', plan TEXT DEFAULT 'free' CHECK (plan IN ('free','pro','agency','enterprise')), gemini_api_key_token TEXT, created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
+CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, data JSONB DEFAULT '{}'::jsonb, updated_at BIGINT DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
+CREATE INDEX IF NOT EXISTS idx_projects_user_id ON projects(user_id);
+CREATE TABLE IF NOT EXISTS payments (id TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id) ON DELETE SET NULL, plan TEXT, amount TEXT, status TEXT DEFAULT 'paid', created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
+CREATE TABLE IF NOT EXISTS integration_settings (id SERIAL PRIMARY KEY, user_id TEXT NOT NULL, platform TEXT DEFAULT 'shopify', map_customer_name TEXT DEFAULT 'customer.first_name', map_customer_phone TEXT DEFAULT 'customer.phone', map_product_title TEXT DEFAULT 'line_items[0].title', map_wilaya TEXT DEFAULT 'shipping_address.province', map_total_price TEXT DEFAULT 'total_price', UNIQUE(user_id));
+CREATE TABLE IF NOT EXISTS incoming_orders (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, source TEXT DEFAULT 'shopify', customer_name TEXT, customer_phone TEXT, phone_status TEXT, wilaya TEXT, wilaya_code TEXT, product_name TEXT, total_price REAL DEFAULT 0, raw_payload JSONB DEFAULT '{}'::jsonb, created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
+CREATE INDEX IF NOT EXISTS idx_incoming_orders_user ON incoming_orders(user_id);
+CREATE TABLE IF NOT EXISTS webhooks (id SERIAL PRIMARY KEY, user_id TEXT NOT NULL, url TEXT, events TEXT[] DEFAULT '{}');
+CREATE TABLE IF NOT EXISTS blacklist (id TEXT PRIMARY KEY, phone TEXT NOT NULL, reason TEXT DEFAULT '', reported_by TEXT DEFAULT '', report_count INTEGER DEFAULT 1, created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
+CREATE INDEX IF NOT EXISTS idx_blacklist_phone ON blacklist(phone);
+CREATE TABLE IF NOT EXISTS revit_orders (id TEXT PRIMARY KEY, merchant_id TEXT DEFAULT 'usr_static', customer_name TEXT, customer_phone TEXT, wilaya TEXT, wilaya_code TEXT, commune TEXT, address TEXT, status TEXT DEFAULT 'pending' CHECK (status IN ('pending','confirmed','delivered','returned','cancelled')), final_score INTEGER DEFAULT 0, risk_level TEXT DEFAULT 'safe' CHECK (risk_level IN ('safe','suspicious','danger')), risk_factors JSONB DEFAULT '[]'::jsonb, total_price REAL DEFAULT 0, source TEXT DEFAULT 'manual', created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
+CREATE INDEX IF NOT EXISTS idx_revit_orders_phone ON revit_orders(customer_phone);
+CREATE INDEX IF NOT EXISTS idx_revit_orders_status ON revit_orders(status);
+CREATE INDEX IF NOT EXISTS idx_revit_orders_wilaya ON revit_orders(wilaya_code);
+CREATE TABLE IF NOT EXISTS confirmation_codes (id TEXT PRIMARY KEY, order_id TEXT, phone TEXT, code TEXT, expires_at BIGINT, status TEXT DEFAULT 'pending' CHECK (status IN ('pending','verified','expired')), created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
+CREATE INDEX IF NOT EXISTS idx_confirmation_order ON confirmation_codes(order_id);`;
+
+    document.getElementById('sql-code').textContent = MIGRATION_SQL;
+
+    async function checkStatus() {
+      const badge = document.getElementById('status-badge');
+      badge.className = 'status-badge status-error';
+      badge.textContent = 'جاري الفحص...';
+
+      try {
+        const r = await fetch('/api/setup/status');
+        const data = await r.json();
+        if (data.ready) {
+          badge.className = 'status-badge status-success';
+          badge.textContent = 'قاعدة البيانات جاهزة ✓';
+          document.getElementById('step2').style.display = 'none';
+          document.getElementById('step3').style.display = 'none';
+        } else {
+          badge.className = 'status-badge status-error';
+          badge.textContent = 'بحاجة لتشغيل SQL Migration';
+          document.getElementById('step2').style.display = 'block';
+          document.getElementById('step3').style.display = 'block';
+        }
+      } catch (e) {
+        badge.textContent = 'فشل الاتصال: ' + e.message;
+      }
+    }
+
+    function copySQL() {
+      navigator.clipboard.writeText(MIGRATION_SQL).then(() => {
+        const btn = document.querySelector('.btn-copy');
+        btn.textContent = 'تم النسخ ✓';
+        setTimeout(() => btn.textContent = 'نسخ SQL', 2000);
+      });
+    }
+
+    checkStatus();
+  </script>
+</body>
+</html>
