@@ -2444,6 +2444,54 @@ app.post("/api/setup/run-migration", async (req, res) => {
   }
 });
 
+// Storage: upload image via Supabase Storage
+app.post("/api/upload/:bucket", async (req, res) => {
+  const bucket = req.params.bucket;
+  if (!['product-images', 'avatars'].includes(bucket)) {
+    return res.status(400).json({ error: 'Invalid bucket. Use: product-images or avatars' });
+  }
+  try {
+    const sUrl = (process.env.SUPABASE_URL || '').replace(/^\uFEFF/, '');
+    const sKey = (process.env.SUPABASE_ANON_KEY || '').replace(/^\uFEFF/, '');
+    const file = req.body?.file;
+    if (!file || !file.name || !file.data) return res.status(400).json({ error: 'Missing file data' });
+
+    const path = `${Date.now()}_${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+    const resp = await fetch(`${sUrl}/storage/v1/object/${bucket}/${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': file.mime || 'application/octet-stream',
+        'apikey': sKey,
+        'Authorization': `Bearer ${sKey}`
+      },
+      body: Buffer.from(file.data, 'base64')
+    });
+
+    if (resp.ok) {
+      const publicUrl = `${sUrl}/storage/v1/object/public/${bucket}/${path}`;
+      res.json({ url: publicUrl, path });
+    } else {
+      const err = await resp.text();
+      res.status(500).json({ error: 'Upload failed: ' + err });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Storage config
+app.get("/api/upload/config", (req, res) => {
+  const sUrl = (process.env.SUPABASE_URL || '').replace(/^\uFEFF/, '');
+  res.json({
+    supabaseUrl: sUrl,
+    storageUrl: `${sUrl}/storage/v1`,
+    buckets: {
+      productImages: `${sUrl}/storage/v1/object/public/product-images`,
+      avatars: `${sUrl}/storage/v1/object/public/avatars`
+    }
+  });
+});
+
 const distPath = path.join(process.cwd(), "dist");
 app.use(express.static(distPath));
 app.get("*", (req, res) => {
