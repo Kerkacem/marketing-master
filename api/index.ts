@@ -2375,11 +2375,8 @@ app.get("/api/setup/status", async (req, res) => {
   }
 });
 
-// Run migration via Supabase Management API (needs PAT token)
+// Run migration — tries pg first, falls back to Management API
 app.post("/api/setup/run-migration", async (req, res) => {
-  const { pat } = req.body;
-  if (!pat) return res.status(400).json({ error: 'Personal Access Token required. Get it from https://supabase.com/dashboard/account/tokens' });
-  
   const migrationSQL = `
     CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, full_name TEXT DEFAULT '', avatar_url TEXT DEFAULT '', plan TEXT DEFAULT 'free' CHECK (plan IN ('free','pro','agency','enterprise')), gemini_api_key_token TEXT, created_at BIGINT DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
     CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, name TEXT NOT NULL, data JSONB DEFAULT '{}'::jsonb, updated_at BIGINT DEFAULT (EXTRACT(EPOCH FROM NOW()) * 1000)::BIGINT);
@@ -2399,24 +2396,51 @@ app.post("/api/setup/run-migration", async (req, res) => {
     CREATE INDEX IF NOT EXISTS idx_confirmation_order ON confirmation_codes(order_id);
   `;
 
-  try {
-    const response = await fetch(`https://api.supabase.com/v1/projects/llklgbevvexnjtotibtj/database/query`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${pat}`,
-      },
-      body: JSON.stringify({ query: migrationSQL })
-    });
+  const { pat } = req.body;
 
-    if (response.ok) {
-      res.json({ success: true, message: 'Migration completed successfully' });
-    } else {
-      const err = await response.json();
-      res.status(400).json({ success: false, error: err.message || JSON.stringify(err) });
+  // Method 1: Direct PostgreSQL (best if IPv6 works on this server)
+  try {
+    const dns = await import('dns');
+    try { dns.setServers(['8.8.8.8', '1.1.1.1']); } catch (_) { /* ok */ }
+    const { Client } = await import('pg');
+    const client = new Client({
+      host: 'db.llklgbevvexnjtotibtj.supabase.co',
+      port: 5432,
+      database: 'postgres',
+      user: 'postgres',
+      password: '20Mohamed@1987',
+      ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 10000
+    });
+    await client.connect();
+    const statements = migrationSQL.split(';').map(s => s.trim()).filter(s => s.length > 0);
+    for (const stmt of statements) {
+      try { await client.query(stmt + ';'); } catch (e2: any) { if (e2.code !== '42P07') throw e2; }
     }
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    await client.end();
+    return res.json({ success: true, method: 'direct-pg' });
+  } catch (pgErr: any) {
+    // Method 2: Management API (needs PAT)
+    if (pat) {
+      try {
+        const resp = await fetch(`https://api.supabase.com/v1/projects/llklgbevvexnjtotibtj/database/query`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${pat}` },
+          body: JSON.stringify({ query: migrationSQL })
+        });
+        if (resp.ok) return res.json({ success: true, method: 'management-api' });
+        const errBody = await resp.json();
+        return res.status(400).json({ success: false, error: `Management API: ${errBody.message || JSON.stringify(errBody)}`, fallbackHint: 'PG direct failed: ' + (pgErr as any).message });
+      } catch (mgtErr: any) {
+        return res.status(500).json({ success: false, error: mgtErr.message, fallbackHint: 'PG direct failed: ' + (pgErr as any).message });
+      }
+    }
+    return res.status(400).json({
+      success: false,
+      error: 'Direct PG connection failed. Need PAT token or manual migration.',
+      pgError: (pgErr as any).message,
+      hint: 'Go to https://marketing-master-six.vercel.app/setup for manual migration'
+    });
   }
 });
 
