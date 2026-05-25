@@ -85,8 +85,8 @@ if (!fs.existsSync(DB_FILE)) {
 }
 
 // Supabase initialization (optional — falls back to db.json when not configured)
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_ANON_KEY || '';
+const supabaseUrl = (process.env.SUPABASE_URL || '').replace(/^\uFEFF/, '');
+const supabaseKey = (process.env.SUPABASE_ANON_KEY || '').replace(/^\uFEFF/, '');
 const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 function isSupabaseActive(): boolean { return !!supabase; }
 
@@ -2363,8 +2363,8 @@ app.get("/api/setup/status", async (req, res) => {
 
   // Quick check — probe the users table via raw REST API
   try {
-    const u = process.env.SUPABASE_URL;
-    const k = process.env.SUPABASE_ANON_KEY || '';
+    const u = (process.env.SUPABASE_URL || '').replace(/^\uFEFF/, '');
+    const k = (process.env.SUPABASE_ANON_KEY || '').replace(/^\uFEFF/, '');
     const resp = await fetch(`${u}/rest/v1/users?select=id&limit=1`, {
       headers: { apikey: k, Authorization: `Bearer ${k}` }
     });
