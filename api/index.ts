@@ -1,11 +1,11 @@
 import express from "express";
+import path from "path";
+import { app } from "../src/createApp.ts";
 
-const app = express();
-app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", message: "Serverless health check" });
-});
-app.get("/api/test", (req, res) => {
-  res.json({ test: true, working: true });
+const distPath = path.join(process.cwd(), "dist");
+app.use(express.static(distPath));
+app.get("*", (req, res) => {
+  res.sendFile(path.join(distPath, "index.html"));
 });
 
 export default app;
