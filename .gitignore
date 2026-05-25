@@ -11,3 +11,5 @@ db.json
 
 .vercel
 .env*.local
+scripts/
+supabase/migration.sql
