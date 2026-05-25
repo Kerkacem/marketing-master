@@ -2361,15 +2361,18 @@ app.get("/api/setup/status", async (req, res) => {
   const sb = (req as any).supabase;
   if (!sb) return res.json({ connected: false, ready: false, error: 'Supabase not configured' });
 
-  // Quick check — just probe the users table
-  const { error } = await sb.from('users').select('id', { count: 'exact', head: true }).limit(0);
-  const ready = !error || error.code !== 'PGRST205';
-
-  res.json({
-    connected: true,
-    ready,
-    tablesExist: ready ? 'all tables present' : 'migration needed — run SQL via Supabase Dashboard > SQL Editor'
-  });
+  // Quick check — probe the users table via raw REST API
+  try {
+    const u = process.env.SUPABASE_URL;
+    const k = process.env.SUPABASE_ANON_KEY || '';
+    const resp = await fetch(`${u}/rest/v1/users?select=id&limit=1`, {
+      headers: { apikey: k, Authorization: `Bearer ${k}` }
+    });
+    const ok = resp.status !== 404;
+    res.json({ connected: true, ready: ok, tablesExist: ok ? 'all tables present' : 'migration needed' });
+  } catch (e: any) {
+    res.json({ connected: false, ready: false, error: e.message });
+  }
 });
 
 // Run migration via Supabase Management API (needs PAT token)
