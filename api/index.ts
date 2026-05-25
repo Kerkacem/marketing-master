@@ -136,6 +136,42 @@ app.use((req: any, res, next) => {
   });
 
   // Auth endpoints
+  // Google OAuth — create/link user from Supabase Auth session
+  app.post("/api/auth/google", async (req, res) => {
+    const { email, name, avatar, supabaseId } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required from Google' });
+
+    const db = readDB();
+    let user = db.users.find((u: any) => u.email === email);
+
+    if (!user) {
+      const newUser = {
+        id: 'usr_' + Math.random().toString(36).substring(2, 11),
+        email: email.toLowerCase().trim(),
+        passwordHash: 'google_oauth_' + (supabaseId || ''),
+        fullName: name || email.split('@')[0],
+        avatarUrl: avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(email)}`,
+        plan: (email === 'kerkacem@gmail.com' ? 'enterprise' : 'free') as 'free' | 'pro' | 'agency' | 'enterprise',
+        geminiApiKeyToken: '',
+        createdAt: Date.now()
+      };
+      db.users.push(newUser);
+      writeDB(db);
+      user = newUser;
+    }
+
+    res.json({
+      user: {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName,
+        avatarUrl: user.avatarUrl,
+        plan: user.plan,
+        geminiApiKeyToken: user.geminiApiKeyToken
+      }
+    });
+  });
+
   app.post("/api/auth/signup", async (req, res) => {
     const { email, password, fullName } = req.body;
     if (!email || !password) {

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
 export interface User {
   id: string;
@@ -15,10 +16,22 @@ interface AuthContextType {
   serverDbAvailable: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   signup: (email: string, password: string, fullName: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithGoogle: () => Promise<void>;
   logout: () => void;
   updateProfile: (fullName: string, avatarUrl: string) => Promise<{ success: boolean; error?: string }>;
   updateGeminiKey: (key: string) => Promise<{ success: boolean; error?: string }>;
   refreshUser: () => Promise<void>;
+}
+
+let supabaseClient: SupabaseClient | null = null;
+function getSupabaseClient() {
+  if (!supabaseClient) {
+    supabaseClient = createClient(
+      'https://llklgbevvexnjtotibtj.supabase.co',
+      'sb_publishable_2IqqD2QjGvg9gPCNHl_K0g_iYCa627o'
+    );
+  }
+  return supabaseClient;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -36,7 +49,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const res = await fetch('/api/health');
         if (res.status === 200 || res.status === 201) {
           const data = await res.json();
-          // If Supabase or server is healthy
           isServerHealthy = true;
           setServerDbAvailable(true);
         } else {
@@ -46,14 +58,67 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setServerDbAvailable(false);
       }
 
-      // Check for user session
+      // Check for Supabase OAuth session
+      try {
+        const sb = getSupabaseClient();
+        const { data: { session } } = await sb.auth.getSession();
+        if (session?.user?.email) {
+          // Exchange Supabase session for app session
+          const res = await fetch('/api/auth/google', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              email: session.user.email,
+              name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
+              avatar: session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || '',
+              supabaseId: session.user.id
+            })
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const u = { ...data.user, passwordHash: 'google_oauth' };
+            if (u.email === 'kerkacem@gmail.com') u.plan = 'enterprise';
+            setUser(u);
+            localStorage.setItem('nextify_saas_user', JSON.stringify(u));
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (e) { /* ignore */ }
+
+      // Listen for Supabase OAuth redirects
+      try {
+        const sb = getSupabaseClient();
+        sb.auth.onAuthStateChange(async (event, session) => {
+          if (event === 'SIGNED_IN' && session?.user?.email) {
+            const res = await fetch('/api/auth/google', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ 
+                email: session.user.email,
+                name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || '',
+                avatar: session.user.user_metadata?.avatar_url || session.user.user_metadata?.picture || '',
+                supabaseId: session.user.id
+              })
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const u = { ...data.user, passwordHash: 'google_oauth' };
+              if (u.email === 'kerkacem@gmail.com') u.plan = 'enterprise';
+              setUser(u);
+              localStorage.setItem('nextify_saas_user', JSON.stringify(u));
+            }
+          }
+        });
+      } catch (e) { /* ignore */ }
+
+      // Check for existing app session
       try {
         const cachedUserStr = localStorage.getItem('nextify_saas_user');
         if (cachedUserStr) {
           const cachedUser = JSON.parse(cachedUserStr);
           
           if (isServerHealthy) {
-            // Profile verification with server
             const profileRes = await fetch('/api/auth/login', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -62,24 +127,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (profileRes.ok) {
               const data = await profileRes.json();
               const u = { ...data.user, passwordHash: cachedUser.passwordHash };
-              if (u.email === 'kerkacem@gmail.com') {
-                u.plan = 'enterprise';
-              }
+              if (u.email === 'kerkacem@gmail.com') u.plan = 'enterprise';
               setUser(u);
               localStorage.setItem('nextify_saas_user', JSON.stringify(u));
             } else {
-              // Local session as active fallback
               const u = { ...cachedUser };
-              if (u.email === 'kerkacem@gmail.com') {
-                u.plan = 'enterprise';
-              }
+              if (u.email === 'kerkacem@gmail.com') u.plan = 'enterprise';
               setUser(u);
             }
           } else {
             const u = { ...cachedUser };
-            if (u.email === 'kerkacem@gmail.com') {
-              u.plan = 'enterprise';
-            }
+            if (u.email === 'kerkacem@gmail.com') u.plan = 'enterprise';
             setUser(u);
           }
         }
@@ -224,11 +282,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const loginWithGoogle = async () => {
+    try {
+      const sb = getSupabaseClient();
+      await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+    } catch (err) {
+      console.error('Google login failed', err);
+    }
+  };
+
   const logout = () => {
     setUser(null);
     localStorage.removeItem('nextify_saas_user');
-    // Clear key session
     localStorage.removeItem('nextify_api_keys');
+    try { getSupabaseClient().auth.signOut(); } catch (e) { /* ignore */ }
   };
 
   const updateProfile = async (fullName: string, avatarUrl: string) => {
@@ -346,6 +413,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       serverDbAvailable,
       login,
       signup,
+      loginWithGoogle,
       logout,
       updateProfile,
       updateGeminiKey,
